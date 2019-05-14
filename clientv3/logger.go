@@ -15,9 +15,10 @@
 package clientv3
 
 import (
-	"io/ioutil"
 	"log"
 	"sync"
+	"os"
+	"time"
 
 	"google.golang.org/grpc/grpclog"
 )
@@ -38,7 +39,7 @@ type settableLogger struct {
 func init() {
 	// disable client side logs by default
 	logger.mu.Lock()
-	logger.l = log.New(ioutil.Discard, "", 0)
+	logger.l = log.New(os.Stdout, "", 0)
 
 	// logger has to override the grpclog at initialization so that
 	// any changes to the grpclog go through logger with locking
@@ -79,4 +80,7 @@ func (s *settableLogger) Fatalf(format string, args ...interface{}) { s.get().Fa
 func (s *settableLogger) Fatalln(args ...interface{})               { s.get().Fatalln(args...) }
 func (s *settableLogger) Print(args ...interface{})                 { s.get().Print(args...) }
 func (s *settableLogger) Printf(format string, args ...interface{}) { s.get().Printf(format, args...) }
-func (s *settableLogger) Println(args ...interface{})               { s.get().Println(args...) }
+func (s *settableLogger) Println(args ...interface{}) {
+	s.get().Print(time.Now().Format("2006/1/2 15:04:05"))
+	s.get().Println(args...)
+	}
