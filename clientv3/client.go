@@ -146,6 +146,8 @@ func (c *Client) autoSync() {
 			if err := c.Sync(ctx); err != nil && err != c.ctx.Err() {
 				logger.Println("Auto sync endpoints failed:", err)
 				c.balancer.next()
+				c.Watcher.Close()
+				c.Watcher = NewWatcher(c)
 			}
 		}
 	}
