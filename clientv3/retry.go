@@ -1,3 +1,4 @@
+
 // Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -33,6 +34,11 @@ func (c *Client) newRetryWrapper() retryRpcFunc {
 				return nil
 			}
 
+			notify := c.balancer.ConnectNotify()
+			if grpc.Code(err) == codes.Unavailable {
+				c.balancer.next()
+			}
+
 			eErr := rpctypes.Error(err)
 			// always stop retry on etcd errors
 			if _, ok := eErr.(rpctypes.EtcdError); ok {
@@ -45,7 +51,7 @@ func (c *Client) newRetryWrapper() retryRpcFunc {
 			}
 
 			select {
-			case <-c.balancer.ConnectNotify():
+			case <-notify:
 			case <-rpcCtx.Done():
 				return rpcCtx.Err()
 			case <-c.ctx.Done():

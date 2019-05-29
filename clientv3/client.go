@@ -50,7 +50,7 @@ type Client struct {
 	conn             *grpc.ClientConn
 	cfg              Config
 	creds            *credentials.TransportCredentials
-	balancer         *simpleBalancer
+	balancer         balancer
 	retryWrapper     retryRpcFunc
 	retryAuthWrapper retryRpcFunc
 	mu       sync.Mutex
@@ -339,11 +339,11 @@ func newClient(cfg *Config) (*Client, error) {
 		client.Password = cfg.Password
 	}
 
-	client.balancer = newHealthBalancer(cfg.Endpoints, cfg.DialTimeout, func(ep string) (bool, error) {
-		return grpcHealthCheck(client, ep)
-	})
+	//client.balancer = newHealthBalancer(cfg.Endpoints, cfg.DialTimeout, func(ep string) (bool, error) {
+	//	return grpcHealthCheck(client, ep)
+	//})
 
-	//newSimpleBalancer(cfg.Endpoints)
+	client.balancer = newSimpleBalancer(cfg.Endpoints)
 	conn, err := client.dial(cfg.Endpoints[0], grpc.WithBalancer(client.balancer))
 	if err != nil {
 		return nil, err
