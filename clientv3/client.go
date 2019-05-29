@@ -53,6 +53,7 @@ type Client struct {
 	balancer         *simpleBalancer
 	retryWrapper     retryRpcFunc
 	retryAuthWrapper retryRpcFunc
+	mu       sync.Mutex
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -111,8 +112,10 @@ func (c *Client) Endpoints() (eps []string) {
 
 // SetEndpoints updates client's endpoints.
 func (c *Client) SetEndpoints(eps ...string) {
+	c.mu.Lock()
 	c.cfg.Endpoints = eps
-	c.balancer.updateAddrs(eps)
+	c.mu.Unlock()
+	c.balancer.updateAddrs(eps...)
 }
 
 // Sync synchronizes client's endpoints with the known endpoints from the etcd membership.
@@ -142,6 +145,9 @@ func (c *Client) autoSync() {
 			ctx, _ := context.WithTimeout(c.ctx, 5*time.Second)
 			if err := c.Sync(ctx); err != nil && err != c.ctx.Err() {
 				logger.Println("Auto sync endpoints failed:", err)
+				c.balancer.next()
+				c.Watcher.Close()
+				c.Watcher = NewWatcher(c)
 			}
 		}
 	}
@@ -212,7 +218,7 @@ func (c *Client) dialSetupOpts(endpoint string, dopts ...grpc.DialOption) (opts 
 	opts = append(opts, dopts...)
 
 	f := func(host string, t time.Duration) (net.Conn, error) {
-		proto, host, _ := parseEndpoint(c.balancer.getEndpoint(host))
+		proto, host, _ := parseEndpoint(c.balancer.endpoint(host))
 		if proto == "" {
 			return nil, fmt.Errorf("unknown scheme for %q", host)
 		}
@@ -221,7 +227,9 @@ func (c *Client) dialSetupOpts(endpoint string, dopts ...grpc.DialOption) (opts 
 			return nil, c.ctx.Err()
 		default:
 		}
-		return net.DialTimeout(proto, host, t)
+
+		d := net.Dialer{Timeout: t, KeepAlive: 20 * time.Second}
+		return d.Dial(proto, host)
 	}
 	opts = append(opts, grpc.WithDialer(f))
 
@@ -331,7 +339,11 @@ func newClient(cfg *Config) (*Client, error) {
 		client.Password = cfg.Password
 	}
 
-	client.balancer = newSimpleBalancer(cfg.Endpoints)
+	client.balancer = newHealthBalancer(cfg.Endpoints, cfg.DialTimeout, func(ep string) (bool, error) {
+		return grpcHealthCheck(client, ep)
+	})
+
+	//newSimpleBalancer(cfg.Endpoints)
 	conn, err := client.dial(cfg.Endpoints[0], grpc.WithBalancer(client.balancer))
 	if err != nil {
 		return nil, err
@@ -345,7 +357,7 @@ func newClient(cfg *Config) (*Client, error) {
 		hasConn := false
 		waitc := time.After(cfg.DialTimeout)
 		select {
-		case <-client.balancer.readyc:
+		case <-client.balancer.ready():
 			hasConn = true
 		case <-ctx.Done():
 		case <-waitc:
